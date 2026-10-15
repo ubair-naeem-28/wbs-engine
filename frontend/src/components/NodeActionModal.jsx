@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import { Sparkles, AlertCircle, CheckCircle2, ChevronRight, Shield, ListCheck, Loader2 } from 'lucide-react'
+import { clientSideNodeAction } from '../services/clientLlm'
 
 export default function NodeActionModal({ node, nodeType, onClose, onApplyChanges }) {
   const [selectedAction, setSelectedAction] = useState('expand')
@@ -15,16 +16,22 @@ export default function NodeActionModal({ node, nodeType, onClose, onApplyChange
     setResult(null)
 
     try {
-      const { data: response } = await axios.post('/api/projects/node-action', {
-        action: selectedAction,
-        node,
-        customPrompt,
-      })
+      try {
+        const { data: response } = await axios.post('/api/projects/node-action', {
+          action: selectedAction,
+          node,
+          customPrompt,
+        })
 
-      if (response.success) {
-        setResult(response.data)
-      } else {
-        throw new Error(response.error || 'AI Action failed.')
+        if (response.success) {
+          setResult(response.data)
+          return
+        }
+      } catch (apiErr) {
+        // Fallback to client-side direct action
+        console.log('[node-action] Backend unavailable, running direct AI action...')
+        const directResult = await clientSideNodeAction(selectedAction, node, customPrompt)
+        setResult(directResult)
       }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to process AI action.')

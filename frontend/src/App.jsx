@@ -1,11 +1,13 @@
 import { useState, useCallback } from 'react'
 import axios from 'axios'
-import { Brain, Sparkles, AlertCircle, ChevronRight } from 'lucide-react'
+import { Brain, Sparkles, AlertCircle, ChevronRight, Key } from 'lucide-react'
 import InputSelector from './components/InputSelector'
 import UrlInput from './components/UrlInput'
 import DocumentInput from './components/DocumentInput'
 import TextInput from './components/TextInput'
 import Dashboard from './components/Dashboard'
+import ApiKeyModal from './components/ApiKeyModal'
+import { clientSideAnalyzeProject, getGeminiApiKey, setGeminiApiKey } from './services/clientLlm'
 
 // ── Validation helpers ─────────────────────────────────────────────────────
 const isValidUrl = (str) => {
@@ -84,6 +86,7 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [meta, setMeta] = useState(null)
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false)
 
   const canSubmit = !isLoading && isFormValid(inputMethod, url, files, description)
 
@@ -107,29 +110,61 @@ export default function App() {
     }, 1800)
 
     try {
-      const formData = new FormData()
-      formData.append('inputMethod', inputMethod)
-      formData.append('decompositionType', decompositionType)
-      formData.append('detailLevel', detailLevel)
+      let analysisData = null
+      let analysisMeta = null
 
-      if (inputMethod === 'url') formData.append('url', url.trim())
-      if (inputMethod === 'document') {
-        files.forEach((f) => formData.append('files', f))
+      // First attempt: Call backend API (if running locally or hosted)
+      try {
+        const formData = new FormData()
+        formData.append('inputMethod', inputMethod)
+        formData.append('decompositionType', decompositionType)
+        formData.append('detailLevel', detailLevel)
+
+        if (inputMethod === 'url') formData.append('url', url.trim())
+        if (inputMethod === 'document') {
+          files.forEach((f) => formData.append('files', f))
+        }
+        if (inputMethod === 'text') formData.append('description', description.trim())
+
+        const { data: response } = await axios.post('/api/projects/analyze', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 40000,
+        })
+
+        if (response.success) {
+          analysisData = response.data
+          analysisMeta = response.meta
+        }
+      } catch (apiErr) {
+        // If static host returns 405 Method Not Allowed or 404 or backend is not active,
+        // automatically switch to Client-Side Direct Cloud AI!
+        const status = apiErr.response?.status
+        console.log(`[analyze] Backend unavailable (status: ${status || 'network'}), using Direct AI...`)
+
+        const directResult = await clientSideAnalyzeProject(
+          inputMethod,
+          { url: url.trim(), files, description: description.trim() },
+          { decompositionType, detailLevel }
+        )
+
+        analysisData = directResult
+        analysisMeta = {
+          inputMethod,
+          decompositionType,
+          detailLevel,
+          mode: 'Direct Cloud AI Engine',
+          generatedAt: new Date().toISOString(),
+        }
       }
-      if (inputMethod === 'text') formData.append('description', description.trim())
 
-      const { data: response } = await axios.post('/api/projects/analyze', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 90000,
-      })
-
-      if (response.success) {
-        setResult(response.data)
-        setMeta(response.meta)
+      if (analysisData) {
+        setResult(analysisData)
+        setMeta(analysisMeta)
       } else {
-        throw new Error(response.error || 'Analysis failed. Please try again.')
+        throw new Error('Analysis could not be generated. Please try again.')
       }
     } catch (err) {
+      console.error('[App] Generation Error:', err)
       const msg =
         err.response?.data?.error ||
         err.message ||
@@ -162,12 +197,29 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-white/30">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            <span>Powered by Gemini</span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsKeyModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs transition-colors cursor-pointer"
+              title="Configure your Gemini API key"
+            >
+              <Key size={13} className="text-amber-400" />
+              <span>API Key</span>
+            </button>
+
+            <div className="flex items-center gap-2 text-xs text-white/30 hidden sm:flex">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span>Powered by Gemini</span>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* API Key Modal */}
+      {isKeyModalOpen && (
+        <ApiKeyModal onClose={() => setIsKeyModalOpen(false)} />
+      )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
         {/* Hero Section */}
