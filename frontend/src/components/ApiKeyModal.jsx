@@ -40,7 +40,7 @@ export default function ApiKeyModal({ onClose }) {
         <form onSubmit={handleSave} className="space-y-4">
           <div className="space-y-2">
             <label className="block text-xs font-medium text-white/70">
-              Google Gemini API Key
+              Google Gemini API Key (Optional)
             </label>
             <input
               type="password"
@@ -49,50 +49,79 @@ export default function ApiKeyModal({ onClose }) {
                 setKey(e.target.value)
                 setSaved(false)
               }}
-              placeholder="AIzaSy... or AQ..."
+              placeholder="AIzaSy..."
               className="input-field text-xs py-2.5 font-mono"
             />
-            <p className="text-[11px] text-white/40 flex items-center gap-1">
-              <Shield size={11} className="text-green-400" />
-              Stored strictly in your local browser storage. Never sent to any server.
-            </p>
+            {key.trim() && !key.trim().startsWith('AIzaSy') && (
+              <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg">
+                ⚠️ Gemini API keys from Google AI Studio always start with <strong>AIzaSy</strong>. Keys starting with <code>AQ.</code> or service tokens are rejected by Google.
+              </p>
+            )}
+            {key.trim() && key.trim().startsWith('AIzaSy') && (
+              <p className="text-[11px] text-emerald-400 flex items-center gap-1">
+                <CheckCircle size={12} /> Valid Google AI Studio Key format.
+              </p>
+            )}
+            {!key.trim() && (
+              <p className="text-[11px] text-white/40 flex items-center gap-1">
+                <Shield size={11} className="text-brand-400" />
+                No key needed! The built-in WBS decomposition engine generates complete hierarchies offline.
+              </p>
+            )}
           </div>
 
           <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-xs text-white/60 space-y-1">
-            <p className="font-medium text-white/80">Don't have a Gemini API key?</p>
-            <p className="text-[11px]">
-              You can get a free API key from Google AI Studio in 30 seconds.
-            </p>
+            <p className="font-medium text-white/80">How to get a 100% Free Gemini API key:</p>
+            <ol className="text-[11px] list-decimal list-inside space-y-0.5 text-white/70">
+              <li>Open Google AI Studio</li>
+              <li>Sign in with your Google account</li>
+              <li>Click <strong>&quot;Create API Key&quot;</strong> and copy your key (starts with <code>AIzaSy</code>)</li>
+            </ol>
             <a
               href="https://aistudio.google.com/app/apikey"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-brand-400 hover:text-brand-300 font-medium text-xs mt-1"
             >
-              Get free Gemini API Key <ExternalLink size={11} />
+              Get Free Gemini API Key from Google AI Studio <ExternalLink size={11} />
             </a>
           </div>
 
           {saved && (
             <div className="p-2.5 rounded-lg bg-green-500/10 border border-green-500/30 text-green-300 text-xs flex items-center gap-2">
-              <CheckCircle size={14} /> Key saved successfully!
+              <CheckCircle size={14} /> Settings updated successfully!
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-secondary py-2 px-4 text-xs"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn-primary py-2 px-5 text-xs font-semibold"
-            >
-              Save Key
-            </button>
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+            {key.trim() ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setKey('')
+                  setGeminiApiKey('')
+                  setSaved(true)
+                }}
+                className="text-xs text-red-400 hover:text-red-300 underline"
+              >
+                Clear Key
+              </button>
+            ) : <span />}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn-secondary py-2 px-4 text-xs"
+              >
+                Close
+              </button>
+              <button
+                type="submit"
+                className="btn-primary py-2 px-5 text-xs font-semibold"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </form>
       </div>

@@ -1,26 +1,20 @@
 import axios from 'axios'
 import { generateLocalWbs } from './wbsGenerator'
 
-const BUILTIN_KEY_B64 = 'QVEuQWI4Uk42SXNLT25RM3cxQXl1QzJHMXBsUF9KdWxaVE9UdDFjdG1oeVYzMHdrLURHMUE='
-
-const getFallbackKey = () => {
-  try {
-    return atob(BUILTIN_KEY_B64)
-  } catch {
-    return ''
-  }
+export const isValidGeminiKey = (k) => {
+  return typeof k === 'string' && k.trim().startsWith('AIzaSy')
 }
 
 export const getGeminiApiKey = () => {
-  return (
-    localStorage.getItem('wbs_gemini_api_key') ||
-    import.meta.env.VITE_GEMINI_API_KEY ||
-    getFallbackKey()
-  )
+  const stored = localStorage.getItem('wbs_gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY
+  if (isValidGeminiKey(stored)) {
+    return stored.trim()
+  }
+  return ''
 }
 
 export const setGeminiApiKey = (key) => {
-  if (key) {
+  if (key && typeof key === 'string' && key.trim()) {
     localStorage.setItem('wbs_gemini_api_key', key.trim())
   } else {
     localStorage.removeItem('wbs_gemini_api_key')
@@ -324,9 +318,12 @@ export const clientSideAnalyzeProject = async (inputMethod, data, options = {}) 
   const systemPrompt = getSystemPrompt(decompositionType, detailLevel)
   const parts = []
 
+  let combinedBriefText = ''
+
   if (inputMethod === 'text') {
+    combinedBriefText = data.description || ''
     parts.push({
-      text: `PROJECT BRIEF:\n${data.description}\n\nDecompose this project into a 4-tier WBS JSON following the 100% Rule.`,
+      text: `PROJECT BRIEF:\n${combinedBriefText}\n\nDecompose this project into a 4-tier WBS JSON following the 100% Rule.`,
     })
   } else if (inputMethod === 'url') {
     let urlContent = ''
@@ -340,9 +337,10 @@ export const clientSideAnalyzeProject = async (inputMethod, data, options = {}) 
       const paragraphs = Array.from(doc.querySelectorAll('p')).slice(0, 30).map((p) => p.innerText).join('\n')
       urlContent = `URL: ${data.url}\nTitle: ${title}\nHeadings:\n${headings}\nBody Content:\n${paragraphs}`
     } catch {
-      urlContent = `URL to analyze: ${data.url}. Extract the project requirements implied by this URL and domain.`
+      urlContent = `URL: ${data.url}\nExtract requirements for this web platform/service domain.`
     }
 
+    combinedBriefText = urlContent
     parts.push({
       text: `PROJECT BRIEF EXTRACTED FROM URL:\n${urlContent}\n\nDecompose this project into a 4-tier WBS JSON following the 100% Rule.`,
     })
@@ -372,6 +370,7 @@ export const clientSideAnalyzeProject = async (inputMethod, data, options = {}) 
             data: b64,
           },
         })
+        extractedTextParts.push(`[PDF Document: ${f.name}]`)
       } else if (/\.(png|jpg|jpeg|webp)$/.test(ext)) {
         const b64 = await fileToBase64(f)
         parts.push({
@@ -380,8 +379,8 @@ export const clientSideAnalyzeProject = async (inputMethod, data, options = {}) 
             data: b64,
           },
         })
+        extractedTextParts.push(`[Image Diagram: ${f.name}]`)
       } else {
-        // Fallback text attempt
         try {
           const txt = await fileToText(f)
           extractedTextParts.push(`=== FILE: ${f.name} ===\n${txt}`)
@@ -391,37 +390,30 @@ export const clientSideAnalyzeProject = async (inputMethod, data, options = {}) 
       }
     }
 
+    combinedBriefText = extractedTextParts.join('\n\n')
     parts.push({
-      text: `Analyze all attached project specifications, documents, and diagrams:\n${extractedTextParts.join('\n\n')}\n\nDecompose this project into a 4-tier WBS JSON following the 100% Rule.`,
+      text: `Analyze all attached project specifications, documents, and diagrams:\n${combinedBriefText}\n\nDecompose this project into a 4-tier WBS JSON following the 100% Rule.`,
     })
   }
 
-  let combinedBriefText = ''
-  if (inputMethod === 'text') {
-    combinedBriefText = data.description || ''
-  } else if (inputMethod === 'url') {
-    combinedBriefText = `Website URL: ${data.url}`
-  } else if (inputMethod === 'document') {
-    const fNames = Array.isArray(data.files) ? data.files.map((f) => f.name).join(', ') : data.file?.name || 'Document'
-    combinedBriefText = `Uploaded Documents: ${fNames}`
-  }
-
-  try {
-    const rawJsonText = await callGeminiClientSide(parts, systemPrompt)
-    const cleanJson = rawJsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-
-    let parsed
+  const apiKey = getGeminiApiKey()
+  if (isValidGeminiKey(apiKey)) {
     try {
-      parsed = JSON.parse(cleanJson)
-      return normalizeWbsHierarchy(parsed, decompositionType)
-    } catch {
-      // If parsing failed, fall back
+      const rawJsonText = await callGeminiClientSide(parts, systemPrompt)
+      const cleanJson = rawJsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+
+      try {
+        const parsed = JSON.parse(cleanJson)
+        return normalizeWbsHierarchy(parsed, decompositionType)
+      } catch (parseErr) {
+        console.warn('[clientLlm] JSON parse fallback:', parseErr)
+      }
+    } catch (cloudErr) {
+      console.warn('[clientLlm] Cloud AI error, using Built-in Decomposition Engine:', cloudErr.message)
     }
-  } catch (cloudErr) {
-    console.warn('[clientLlm] Cloud AI unavailable or key invalid. Using Built-in Decomposition Engine:', cloudErr.message)
   }
 
-  // Guaranteed intelligent local generator
+  // Guaranteed intelligent local generator - ALWAYS succeeds for URL, Document, and Text
   return generateLocalWbs(inputMethod, combinedBriefText, options)
 }
 
@@ -483,13 +475,18 @@ Return ONLY JSON:
 }`
   }
 
-  try {
-    const raw = await callGeminiClientSide([{ text: prompt }])
-    const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-    return JSON.parse(clean)
-  } catch (err) {
-    console.warn('[node-action] Cloud AI unavailable, using intelligent local refinement:', err.message)
-    const name = node.taskTitle || node.packageName || node.deliverableName || 'Element'
+  const apiKey = getGeminiApiKey()
+  if (isValidGeminiKey(apiKey)) {
+    try {
+      const raw = await callGeminiClientSide([{ text: prompt }])
+      const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+      return JSON.parse(clean)
+    } catch (err) {
+      console.warn('[node-action] Cloud AI unavailable, using intelligent local refinement:', err.message)
+    }
+  }
+
+  const name = node.taskTitle || node.packageName || node.deliverableName || 'Element'
 
     if (action === 'expand') {
       return {
@@ -556,5 +553,4 @@ Return ONLY JSON:
         ],
       }
     }
-  }
 }
