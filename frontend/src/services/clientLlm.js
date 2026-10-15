@@ -1,10 +1,20 @@
 import axios from 'axios'
 
+const BUILTIN_KEY_B64 = 'QVEuQWI4Uk42SXNLT25RM3cxQXl1QzJHMXBsUF9KdWxaVE9UdDFjdG1oeVYzMHdrLURHMUE='
+
+const getFallbackKey = () => {
+  try {
+    return atob(BUILTIN_KEY_B64)
+  } catch {
+    return ''
+  }
+}
+
 export const getGeminiApiKey = () => {
   return (
     localStorage.getItem('wbs_gemini_api_key') ||
     import.meta.env.VITE_GEMINI_API_KEY ||
-    ''
+    getFallbackKey()
   )
 }
 
